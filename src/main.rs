@@ -1,6 +1,8 @@
 mod build;
 mod cmd;
 mod common;
+#[cfg(feature = "compression")]
+mod compression;
 mod config;
 mod pipelines;
 mod proxy;

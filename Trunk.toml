@@ -41,3 +41,22 @@ backend = "http://localhost:9000/"
 # This proxy specifies only the backend, which is the only required field. In this example,
 # request URIs are not modified when proxied.
 backend = "http://localhost:9000/api/v2/"
+
+# Compression of assets is optional and requires `trunk`
+# to be built with a compression feature enabled.
+#
+# Mutliple compressors may be specified.
+[[compression]]
+# Specifies the compression algorithm to be used. You must
+# specify the algorithm for each compression array.
+algorithm = "gzip"
+# Options to pass to the compression algorithm.
+options = { level = 9 }
+# A RegExp test to pass to include assets that pass the RegExp test. Optional.
+test = "/\.(js|css|png|jp(e)?g|wasm)(\?.*)?$/i"
+# Allow for exclusion of certain assets via glob. Optional.
+exclude = ["favicon.ico", "*.gz"] 
+# Size of asset (in bytes) that should be compressed. Optional.
+threshold = 8192
+# Minimum compressed asset size ratio for output. Optional.
+ratio = 0.8

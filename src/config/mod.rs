@@ -10,4 +10,6 @@ mod rt;
 
 pub use manifest::CargoMetadata;
 pub use models::{ConfigOpts, ConfigOptsBuild, ConfigOptsClean, ConfigOptsProxy, ConfigOptsServe, ConfigOptsWatch};
+#[cfg(feature = "compression")]
+pub use models::ConfigOptsCompression;
 pub use rt::{RtcBuild, RtcClean, RtcServe, RtcWatch};

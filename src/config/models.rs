@@ -93,6 +93,8 @@ pub struct ConfigOpts {
     pub serve: Option<ConfigOptsServe>,
     pub clean: Option<ConfigOptsClean>,
     pub proxy: Option<Vec<ConfigOptsProxy>>,
+    #[cfg(feature = "compression")]
+    pub compression: Option<Vec<ConfigOptsCompression>>,
 }
 
 impl ConfigOpts {
@@ -154,6 +156,8 @@ impl ConfigOpts {
             serve: None,
             clean: None,
             proxy: None,
+            #[cfg(feature = "compression")]
+            compression: None,
         };
         Self::merge(cfg_base, cfg_build)
     }
@@ -166,6 +170,8 @@ impl ConfigOpts {
             serve: None,
             clean: None,
             proxy: None,
+            #[cfg(feature = "compression")]
+            compression: None,
         };
         Self::merge(cfg_base, cfg)
     }
@@ -183,6 +189,8 @@ impl ConfigOpts {
             serve: Some(opts),
             clean: None,
             proxy: None,
+            #[cfg(feature = "compression")]
+            compression: None,
         };
         Self::merge(cfg_base, cfg)
     }
@@ -198,6 +206,8 @@ impl ConfigOpts {
             serve: None,
             clean: Some(opts),
             proxy: None,
+            #[cfg(feature = "compression")]
+            compression: None,
         };
         Self::merge(cfg_base, cfg)
     }
@@ -269,10 +279,13 @@ impl ConfigOpts {
             serve: Some(serve),
             clean: Some(clean),
             proxy: None,
+            #[cfg(feature = "compression")]
+            compression: None, //@TODO: add environment options?
         })
     }
 
     /// Merge the given layers, where the `greater` layer takes precedence.
+    #[cfg(not(feature = "compression"))]
     fn merge(mut lesser: Self, mut greater: Self) -> Self {
         greater.build = match (lesser.build.take(), greater.build.take()) {
             (None, None) => None,
@@ -328,5 +341,181 @@ impl ConfigOpts {
             (Some(_), Some(g)) => Some(g), // No meshing/merging. Only take the greater value.
         };
         greater
+    }
+
+    /// Merge the given layers, where the `greater` layer takes precedence.
+    #[cfg(feature = "compression")]
+    fn merge(mut lesser: Self, mut greater: Self) -> Self {
+        greater.build = match (lesser.build.take(), greater.build.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(l), Some(mut g)) => {
+                g.target = g.target.or(l.target);
+                g.dist = g.dist.or(l.dist);
+                g.public_url = g.public_url.or(l.public_url);
+                // NOTE: this can not be disabled in the cascade.
+                if l.release {
+                    g.release = true
+                }
+                Some(g)
+            }
+        };
+        greater.watch = match (lesser.watch.take(), greater.watch.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(l), Some(mut g)) => {
+                g.ignore = g.ignore.or(l.ignore);
+                Some(g)
+            }
+        };
+        greater.serve = match (lesser.serve.take(), greater.serve.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(l), Some(mut g)) => {
+                g.proxy_backend = g.proxy_backend.or(l.proxy_backend);
+                g.proxy_rewrite = g.proxy_rewrite.or(l.proxy_rewrite);
+                g.port = g.port.or(l.port);
+                // NOTE: this can not be disabled in the cascade.
+                if l.open {
+                    g.open = true
+                }
+                Some(g)
+            }
+        };
+        greater.clean = match (lesser.clean.take(), greater.clean.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(l), Some(mut g)) => {
+                g.dist = g.dist.or(l.dist);
+                // NOTE: this can not be disabled in the cascade.
+                if l.cargo {
+                    g.cargo = true
+                }
+                Some(g)
+            }
+        };
+        greater.proxy = match (lesser.proxy.take(), greater.proxy.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(_), Some(g)) => Some(g), // No meshing/merging. Only take the greater value.
+        };
+        greater.compression = match(lesser.compression.take(), greater.compression.take()) {
+            (None, None) => None,
+            (Some(val), None) | (None, Some(val)) => Some(val),
+            (Some(_), Some(g)) => Some(g),
+        };
+        greater
+    }
+}
+
+#[cfg(feature = "compression")]
+use crate::compression::{Compressor, CompressorOptions};
+
+/// Struct for deserialized compression configuration.
+/// 
+/// **NOTE**
+/// This struct is gated by the "compression" feature. `trunk` must be compiled with the feature enabled for this config to be used.
+/// 
+/// Ex: For enabling gzip compression.
+///     ```sh
+///     cargo install trunk --features gzip-compression
+///     ```
+#[cfg(feature = "compression")]
+#[derive(Clone, Debug, Deserialize)]
+pub struct ConfigOptsCompression {
+    /// Specifies the compression algorithm. A valid algorithm _must_ be specified.
+    pub algorithm: Compressor,
+    /// Specifies options to be passed to the compression algorithm. Optional.
+    /// @TODO: Ensure that multiple compression algorithms can use the same `options` field.
+    #[serde(default)]
+    pub options: Option<CompressorOptions>,
+    /// A RegExp test used to include/exclude assets for compression. Optional.
+    #[serde(default)]
+    pub test: Option<String>,
+    /// Allow for inclusion of certain assets. Optional.
+    /// @TODO: Figure out how to actually do this with minimal overhead.
+    #[serde(default)]
+    pub include: Option<Vec<String>>,
+    /// Allow for exclusion of certain assets. Optional.
+    /// @TODO: Figure out how to actually do this with minimal overhead.
+    #[serde(default)]
+    pub exclude: Option<Vec<String>>,
+    /// Size of assets (in bytes) that should be compressed. Optional.
+    #[serde(default)]
+    threshold: Option<usize>,
+    /// Minimum compression ratio to original file size to emit.
+    /// Asset compression below the desired ratio will not emit a resultant compressed file.
+    /// Optional.
+    #[serde(default)]
+    ratio: Option<f32>,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::ConfigOpts;
+    use std::error::Error;
+    #[cfg(feature = "compression")]
+    use crate::compression::{Compressor, CompressorOptions};
+
+    #[test]
+    #[cfg_attr(not(feature = "gzip-compression"), ignore)]
+    fn deserialize_config_opts_compression_gzip() -> Result<(), Box<dyn Error>> {
+        let input = r#"
+            [[compression]]
+            algorithm = "gzip"
+            options = { level = 9 }
+        "#;
+
+        let config: ConfigOpts = toml::from_str(&input)?;
+
+        assert!(config.compression.is_some());
+
+        if let Some(compressors) = config.compression {
+            assert_eq!(compressors.len(), 1);
+            for compressor in compressors {
+                assert_eq!(compressor.algorithm, Compressor::Gzip);
+                assert!(compressor.options.is_some());
+                let options: CompressorOptions = compressor.options.unwrap();
+                assert!(options.level.is_some());
+                assert_eq!(options.level.unwrap(), 9);
+            }
+            Ok(())
+        } else {
+            Err(Box::from("Should have been a valid compression configuration"))
+        }
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "compression"), ignore)]
+    fn deserialize_config_opts_compression_none() -> Result<(), Box<dyn Error>> {
+        let input = r#"
+        [build]
+        target = "src/index.html"
+        dist = "dist"
+        public_url = "/assets/"
+
+        [serve]
+        port = 9000
+        "#;
+
+        let config: ConfigOpts = toml::from_str(&input)?;
+
+        assert!(config.compression.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "compression"), ignore)]
+    #[should_panic]
+    fn invalid_config_opts_compression() {
+        let input = r#"
+            [[compression]]
+            ratio = 0.8
+        "#;
+
+        let _config: ConfigOpts = toml::from_str(&input)
+            .expect("Should not have constructed a valid compression config");
     }
 }
